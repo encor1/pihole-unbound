@@ -30,11 +30,10 @@ services:
         ipv4_address: 172.30.0.2
 
     # Prüft regelmäßig, ob Unbound DNS-Anfragen auf seinem konfigurierten
-    # Port 5335 beantworten kann. Ohne "-p 5335" würde drill den
-    # Standardport 53 abfragen und den Container fälschlich als
-    # "unhealthy" markieren.
+    # Port 5335 beantworten kann. Bei drill steht zuerst der abzufragende
+    # Domainname und danach optional der Server im Format @adresse.
     healthcheck:
-      test: ["CMD", "drill", "-p", "5335", "@127.0.0.1", "cloudflare.com"]
+      test: ["CMD", "drill", "-p", "5335", "cloudflare.com", "@127.0.0.1"]
       interval: 30s
       timeout: 5s
       retries: 3
