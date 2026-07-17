@@ -1,0 +1,10 @@
+# Lokale Zugangsdaten
+.env
+
+# Persistente Pi-hole-Laufzeitdaten
+pihole/
+
+# Betriebssystem- und Editor-Dateien
+.DS_Store
+*.swp
+*.swo
