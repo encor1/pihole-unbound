@@ -1,0 +1,109 @@
+services:
+  #
+  # Rekursiver DNS-Resolver
+  #
+  # Pi-hole leitet alle nicht lokal beantwortbaren DNS-Anfragen an
+  # diesen Container weiter. Unbound fragt anschließend selbst die
+  # DNS-Hierarchie ab, statt einen öffentlichen Resolver wie Google
+  # oder Cloudflare zu verwenden.
+  #
+  unbound:
+    image: mvance/unbound:latest
+    container_name: unbound
+
+    # Container nach einem Absturz und nach einem Neustart des Hosts
+    # automatisch wieder starten. Ein manuell gestoppter Container
+    # bleibt dagegen gestoppt.
+    restart: unless-stopped
+
+    # Die Unbound-Konfiguration wird schreibgeschützt eingebunden.
+    # Änderungen erfolgen ausschließlich in der versionierten Datei
+    # unter ./unbound/unbound.conf.
+    volumes:
+      - ./unbound/unbound.conf:/opt/unbound/etc/unbound/unbound.conf:ro
+
+    # Unbound erhält eine feste IP im internen Docker-Netz.
+    # Dadurch kann Pi-hole den Resolver zuverlässig unter derselben
+    # Adresse erreichen.
+    networks:
+      dns:
+        ipv4_address: 172.30.0.2
+
+    # Prüft regelmäßig, ob Unbound DNS-Anfragen beantworten kann.
+    # Pi-hole wird durch depends_on erst gestartet, wenn dieser Check
+    # erfolgreich ist.
+    healthcheck:
+      test: ["CMD", "drill", "@127.0.0.1", "cloudflare.com"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  #
+  # Pi-hole
+  #
+  # DNS-Server für das Heimnetz und Weboberfläche zur Verwaltung von
+  # Blocklisten, lokalen DNS-Einträgen und Statistiken.
+  #
+  pihole:
+    image: pihole/pihole:latest
+    container_name: pihole
+    restart: unless-stopped
+
+    # Pi-hole soll erst starten, wenn Unbound tatsächlich erreichbar
+    # und laut Healthcheck funktionsfähig ist.
+    depends_on:
+      unbound:
+        condition: service_healthy
+
+    # Port 53 wird für normale DNS-Anfragen benötigt – sowohl über UDP
+    # als auch über TCP. Das Webinterface wird auf Host-Port 8080 gelegt,
+    # damit Port 80 für andere Dienste frei bleibt.
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "8080:80/tcp"
+
+    environment:
+      # Zeitzone für Logs, Statistiken und Zeitangaben im Webinterface.
+      TZ: Europe/Berlin
+
+      # Das Passwort wird nicht ins Repository geschrieben, sondern aus
+      # der lokalen .env-Datei geladen. Vorlage: .env.example
+      FTLCONF_webserver_api_password: ${PIHOLE_PASSWORD}
+
+      # In einem Docker-Bridge-Netzwerk kommen Anfragen nicht direkt von
+      # einem lokalen Interface. Daher muss Pi-hole auf allen Interfaces
+      # innerhalb des Containers lauschen.
+      FTLCONF_dns_listeningMode: ALL
+
+      # Einziger Upstream-DNS ist Unbound im internen Docker-Netz.
+      # Das Zeichen # trennt bei Pi-hole Adresse und Port.
+      FTLCONF_dns_upstreams: 172.30.0.2#5335
+
+      # DNSSEC wird bereits von Unbound validiert. Eine zweite Validierung
+      # in Pi-hole ist deshalb nicht erforderlich.
+      FTLCONF_dns_dnssec: "false"
+
+    # Persistente Pi-hole-Daten, unter anderem Einstellungen,
+    # Blocklisten, Statistiken und lokale DNS-Einträge.
+    volumes:
+      - ./pihole:/etc/pihole
+
+    networks:
+      dns:
+        ipv4_address: 172.30.0.3
+
+#
+# Internes DNS-Netzwerk
+#
+# Dieses Bridge-Netz dient ausschließlich der Kommunikation zwischen
+# Pi-hole und Unbound. Unbound veröffentlicht bewusst keinen Host-Port
+# und kann daher nicht direkt aus dem Heimnetz angesprochen werden.
+#
+networks:
+  dns:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
